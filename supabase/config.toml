@@ -1,0 +1,5 @@
+[functions.ai-assistant]
+verify_jwt = true
+
+[functions.project-bundle]
+verify_jwt = true
