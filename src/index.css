@@ -1,18 +1,75 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-background: #fafafa;
-  --color-foreground: #0f172a;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --color-background: #f6f5f2;
+  --color-foreground: #1c1917;
   --color-card: #ffffff;
-  --color-muted: #f1f5f9;
-  --color-muted-foreground: #64748b;
-  --color-border: #e2e8f0;
-  --color-primary: #2563eb;
+  --color-card-foreground: #1c1917;
+  --color-muted: #eeede8;
+  --color-muted-foreground: #78716c;
+  --color-border: #e7e5e0;
+  --color-primary: #4f46e5;
   --color-primary-foreground: #ffffff;
+  --color-secondary: #f0effa;
+  --color-secondary-foreground: #3730a3;
   --color-destructive: #dc2626;
-  --color-accent: #f1f5f9;
-  --color-sidebar: #ffffff;
-  --radius-lg: 0.5rem;
+  --color-destructive-foreground: #ffffff;
+  --color-accent: #eef2ff;
+  --color-accent-foreground: #4338ca;
+  --color-success: #059669;
+  --color-success-foreground: #ffffff;
+  --color-warning: #d97706;
+  --color-warning-foreground: #ffffff;
+  --color-sidebar: #fafaf8;
+  --color-sidebar-foreground: #44403c;
+  --color-ring: #4f46e5;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+
+  --shadow-xs: 0 1px 2px 0 rgb(28 25 23 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(28 25 23 / 0.06), 0 1px 2px -1px rgb(28 25 23 / 0.06);
+  --shadow-md: 0 4px 6px -1px rgb(28 25 23 / 0.07), 0 2px 4px -2px rgb(28 25 23 / 0.05);
+  --shadow-lg: 0 10px 15px -3px rgb(28 25 23 / 0.08), 0 4px 6px -4px rgb(28 25 23 / 0.05);
+  --shadow-glow: 0 0 0 1px rgb(79 70 229 / 0.08), 0 4px 24px -4px rgb(79 70 229 / 0.18);
+
+  --animate-fade-in: fade-in 0.35s ease-out both;
+  --animate-slide-up: slide-up 0.4s ease-out both;
+  --animate-shimmer: shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 @layer base {
@@ -22,7 +79,6 @@
     border-color: var(--color-border);
   }
 
-  /* Иначе у кнопок без border-* видна рамка браузера + border-color выше */
   button,
   [role='button'],
   input,
@@ -30,26 +86,83 @@
   textarea {
     border-width: 0;
   }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+    color: var(--color-foreground);
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-ring) 50%, transparent);
+    outline-offset: 2px;
+  }
 }
 
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-}
+@layer utilities {
+  .page-enter {
+    animation: var(--animate-fade-in), var(--animate-slide-up);
+  }
 
-#root {
-  min-height: 100vh;
+  .skeleton-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--color-muted) 0%,
+      color-mix(in srgb, var(--color-muted) 60%, white) 50%,
+      var(--color-muted) 100%
+    );
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+
+  .auth-gradient {
+    background:
+      radial-gradient(ellipse 80% 60% at 50% -10%, rgb(79 70 229 / 0.14), transparent),
+      radial-gradient(ellipse 50% 40% at 100% 100%, rgb(99 102 241 / 0.08), transparent),
+      var(--color-background);
+  }
+
+  .metric-card-reach {
+    background: linear-gradient(135deg, rgb(79 70 229 / 0.06) 0%, transparent 60%);
+  }
+
+  .metric-card-er {
+    background: linear-gradient(135deg, rgb(5 150 105 / 0.07) 0%, transparent 60%);
+  }
+
+  .metric-card-count {
+    background: linear-gradient(135deg, rgb(217 119 6 / 0.06) 0%, transparent 60%);
+  }
 }
 
 .chat-message-actions button {
   border-width: 0;
   box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

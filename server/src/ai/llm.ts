@@ -7,10 +7,19 @@ const SYSTEM_PROMPT = `You are an SMM analytics copilot. Rules:
 6) Add confidence: низкая/средняя/высокая.
 Respond in Russian.`
 
+const CHAT_SYSTEM_PROMPT = `You are a friendly SMM consultant in a project workspace. Rules:
+1) You know the current project from context JSON (name, niche, channels, goals, metrics, hypotheses).
+2) Answer naturally in Russian — like a knowledgeable colleague, not a formal report.
+3) Only cite metrics and posts that appear in context; never invent numbers.
+4) If metrics are missing, you may still discuss goals, niche and general SMM — and suggest importing data when numbers would help.
+5) For strategy questions, prefer testable hypotheses over final decisions; do not output a full monthly content plan.
+6) Keep answers concise unless the user asks for detail.
+7) Do not add a "confidence" block unless the user asks for an analytical conclusion with evidence.`
+
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string }
 
 export type AiChatRequest = {
-  mode: 'analyst' | 'coach'
+  mode: 'analyst' | 'coach' | 'chat'
   scenario?: string
   messages?: ChatMessage[]
   context?: unknown
@@ -130,8 +139,23 @@ function buildCoachSummaryUserContent(body: AiChatRequest): string {
 ${contextJson(body)}`
 }
 
+function buildChatModeMessages(body: AiChatRequest): ChatMessage[] {
+  const history = toLlmHistory(body.messages)
+  return [
+    {
+      role: 'system',
+      content: `${CHAT_SYSTEM_PROMPT}\n\nКонтекст проекта:\n${contextJson(body)}`,
+    },
+    ...history,
+  ]
+}
+
 /** Собирает messages для LLM без дублирования истории в JSON */
 export function buildChatMessages(body: AiChatRequest): ChatMessage[] {
+  if (body.mode === 'chat') {
+    return buildChatModeMessages(body)
+  }
+
   const history = toLlmHistory(body.messages)
   const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history]
 

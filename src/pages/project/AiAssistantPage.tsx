@@ -1,21 +1,27 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { BarChart3, Send, Sparkles, UserRound } from 'lucide-react'
+import { BarChart3, MessageCircle, Send, Sparkles, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { subDays } from 'date-fns'
+import { AiChatHistory } from '@/components/chat/AiChatHistory'
 import { AiChatThread } from '@/components/chat/AiChatThread'
 import { useProject } from '@/hooks/useProject'
 import {
-  saveAiSession,
+  createAiChat,
+  deleteAiChat,
+  getAiChat,
+  listAiChats,
+  readChatListCache,
   streamAiAssistant,
+  updateAiChat,
   typewriterMock,
 } from '@/lib/ai-api'
-import { historyForApi } from '@/lib/ai-chat-utils'
+import { historyForApi, messagesForPersist } from '@/lib/ai-chat-utils'
 import { buildAiContext } from '@/lib/ai-context'
 import { useMockAi } from '@/lib/ai-config'
 import { getMockAiResponse, mockAiDelay, type MockAiPayload } from '@/lib/mock-ai'
 import { ANALYST_SCENARIOS } from '@/lib/constants'
-import type { AiMessage } from '@/types/database'
+import type { AiMessage, AiMode, AiSession } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
@@ -47,18 +53,38 @@ function newMessage(
   }
 }
 
+function hydrateMessages(raw: AiMessage[]): AiMessage[] {
+  return raw.map((m) => ({
+    ...m,
+    id: m.id ?? crypto.randomUUID(),
+    confidence:
+      m.confidence === 'низкая' || m.confidence === 'средняя' || m.confidence === 'высокая'
+        ? m.confidence
+        : undefined,
+  }))
+}
+
 export function AiAssistantPage() {
   const mockMode = useMockAi()
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { posts, hypotheses, loading: bundleLoading } = useProject(projectId)
-  const [mode, setMode] = useState<'analyst' | 'coach'>('analyst')
+  const { project, posts, hypotheses, loading: bundleLoading } = useProject(projectId)
+  const [mode, setMode] = useState<AiMode>('chat')
   const [messages, setMessages] = useState<AiMessage[]>([])
+  const [chatList, setChatList] = useState<AiSession[]>([])
+  const [chatsLoading, setChatsLoading] = useState(false)
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [waitingReply, setWaitingReply] = useState(false)
   const [coachStep, setCoachStep] = useState(0)
   const [coachInput, setCoachInput] = useState('')
   const [analystInput, setAnalystInput] = useState('')
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [chatInput, setChatInput] = useState('')
+  const persistInFlightRef = useRef<Promise<void> | null>(null)
+  const activeChatIdRef = useRef<string | null>(null)
+  const modeRef = useRef(mode)
+  const persistChatRef = useRef<(msgs: AiMessage[]) => Promise<void>>(async () => {})
+
+  modeRef.current = mode
 
   const hasData = posts.length > 0
   const isBusy = waitingReply || messages.some((m) => m.streaming)
@@ -67,18 +93,147 @@ export function AiAssistantPage() {
     hypotheses,
     subDays(new Date(), 30),
     new Date(),
+    project,
   )
 
-  const schedulePersist = useCallback(
-    (msgs: AiMessage[]) => {
+  const loadChatList = useCallback(async (refresh = false) => {
+    if (!projectId) return
+
+    const cached = !refresh ? readChatListCache(projectId, mode) : null
+    if (cached) {
+      setChatList(cached)
+    }
+
+    setChatsLoading(!cached)
+    try {
+      const list = await listAiChats(projectId, mode, refresh)
+      setChatList(list)
+    } catch (e) {
+      if (!cached) {
+        console.warn('[AiAssistant] chat list', e)
+      }
+    } finally {
+      setChatsLoading(false)
+    }
+  }, [projectId, mode])
+
+  useEffect(() => {
+    void loadChatList()
+  }, [loadChatList])
+
+  const persistChat = useCallback(
+    async (msgs: AiMessage[]) => {
       if (!projectId) return
-      if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
-      persistTimerRef.current = setTimeout(() => {
-        saveAiSession(projectId, mode, msgs).catch(() => {})
-      }, 600)
+
+      const stored = messagesForPersist(msgs)
+      if (stored.length === 0) return
+
+      const run = async () => {
+        const currentMode = modeRef.current
+        try {
+          if (activeChatIdRef.current) {
+            const chat = await updateAiChat(projectId, activeChatIdRef.current, {
+              mode: currentMode,
+              messages: stored,
+            })
+            setChatList((prev) => {
+              const idx = prev.findIndex((c) => c.id === chat.id)
+              if (idx === -1) return [chat, ...prev]
+              const next = [...prev]
+              next[idx] = chat
+              return next
+            })
+          } else {
+            const chat = await createAiChat(projectId, {
+              mode: currentMode,
+              messages: stored,
+            })
+            activeChatIdRef.current = chat.id
+            setActiveChatId(chat.id)
+            setChatList((prev) => [chat, ...prev.filter((c) => c.id !== chat.id)])
+          }
+        } catch (e) {
+          console.warn('[persistChat]', e)
+          toast.error(e instanceof Error ? e.message : 'Не удалось сохранить диалог')
+        }
+      }
+
+      if (persistInFlightRef.current) {
+        await persistInFlightRef.current
+      }
+
+      const task = run()
+      persistInFlightRef.current = task
+      try {
+        await task
+      } finally {
+        persistInFlightRef.current = null
+      }
     },
-    [projectId, mode],
+    [projectId],
   )
+
+  persistChatRef.current = persistChat
+
+  const startNewChat = useCallback(() => {
+    activeChatIdRef.current = null
+    setActiveChatId(null)
+    setMessages([])
+    setCoachStep(0)
+    setCoachInput('')
+    setAnalystInput('')
+    setChatInput('')
+    setWaitingReply(false)
+  }, [])
+
+  const openChat = useCallback(
+    async (chatId: string) => {
+      if (!projectId || isBusy) return
+      try {
+        const chat = await getAiChat(projectId, chatId)
+        if (chat.mode !== mode) {
+          setMode(chat.mode)
+        }
+        activeChatIdRef.current = chat.id
+        setActiveChatId(chat.id)
+        setMessages(hydrateMessages(chat.messages))
+        setCoachInput('')
+        setAnalystInput('')
+        setChatInput('')
+        setCoachStep(
+          chat.mode === 'coach' && chat.context_snapshot?.coachStep != null
+            ? chat.context_snapshot.coachStep
+            : 0,
+        )
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Не удалось открыть диалог')
+      }
+    },
+    [isBusy, mode, projectId],
+  )
+
+  const removeChat = useCallback(
+    async (chatId: string) => {
+      if (!projectId) return
+      if (!confirm('Удалить этот диалог?')) return
+      try {
+        await deleteAiChat(projectId, chatId, mode)
+        if (activeChatIdRef.current === chatId) {
+          startNewChat()
+        }
+        void loadChatList()
+        toast.success('Диалог удалён')
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Ошибка удаления')
+      }
+    },
+    [loadChatList, projectId, startNewChat],
+  )
+
+  const switchMode = (nextMode: AiMode) => {
+    setMode(nextMode)
+    startNewChat()
+  }
 
   const appendDelta = useCallback((assistantId: string, text: string) => {
     setMessages((prev) =>
@@ -94,7 +249,9 @@ export function AiAssistantPage() {
       const pendingLabel =
         payload.mode === 'analyst'
           ? 'Смотрю метрики и готовлю выводы…'
-          : 'Собираю рекомендации по вашим ответам…'
+          : payload.mode === 'coach'
+            ? 'Собираю рекомендации по вашим ответам…'
+            : 'Думаю…'
 
       setMessages([
         ...history,
@@ -106,16 +263,18 @@ export function AiAssistantPage() {
       ])
       setWaitingReply(true)
 
-      let confidence: AiMessage['confidence'] = 'средняя'
+      let confidence: AiMessage['confidence'] | undefined =
+        payload.mode === 'chat' ? undefined : 'средняя'
       let fullContent = ''
 
       const apiMessages = historyForApi(history)
+      const mockHasData = payload.mode === 'chat' ? context.hasData : hasData
 
       try {
         if (mockMode) {
           await mockAiDelay(200)
-          const mock = getMockAiResponse({ ...payload, messages: apiMessages }, hasData)
-          confidence = mock.confidence
+          const mock = getMockAiResponse({ ...payload, messages: apiMessages }, mockHasData)
+          if (payload.mode !== 'chat') confidence = mock.confidence
           await typewriterMock(mock.content, (chunk) => {
             fullContent += chunk
             appendDelta(assistantId, chunk)
@@ -134,19 +293,21 @@ export function AiAssistantPage() {
               },
             )
             fullContent = result.content
-            confidence = (result.confidence as AiMessage['confidence']) ?? 'средняя'
+            if (payload.mode !== 'chat') {
+              confidence = (result.confidence as AiMessage['confidence']) ?? 'средняя'
+            }
           } catch (aiErr) {
             const err = aiErr instanceof Error ? aiErr.message : 'Ошибка AI'
             if (err.includes('DEEPSEEK_API_KEY') || err.includes('OPENAI_API_KEY')) {
               toast.info('LLM не настроен — демо-ответ')
-              const mock = getMockAiResponse({ ...payload, messages: apiMessages }, hasData)
-              confidence = mock.confidence
+              const mock = getMockAiResponse({ ...payload, messages: apiMessages }, mockHasData)
+              if (payload.mode !== 'chat') confidence = mock.confidence
               await typewriterMock(mock.content, (chunk) => appendDelta(assistantId, chunk))
               fullContent = mock.content
             } else if (err.includes('fetch') || err.includes('Failed')) {
               toast.info('Сервер недоступен — демо-ответ')
-              const mock = getMockAiResponse({ ...payload, messages: apiMessages }, hasData)
-              confidence = mock.confidence
+              const mock = getMockAiResponse({ ...payload, messages: apiMessages }, mockHasData)
+              if (payload.mode !== 'chat') confidence = mock.confidence
               await typewriterMock(mock.content, (chunk) => appendDelta(assistantId, chunk))
               fullContent = mock.content
             } else {
@@ -159,20 +320,20 @@ export function AiAssistantPage() {
           id: assistantId,
           role: 'assistant',
           content: fullContent,
-          confidence,
+          ...(confidence ? { confidence } : {}),
           timestamp: now(),
           streaming: false,
         }
 
         setMessages((prev) => prev.map((m) => (m.id === assistantId ? finalMsg : m)))
         const full = [...history, finalMsg]
-        schedulePersist(full)
+        void persistChatRef.current(full)
         return full
       } finally {
         setWaitingReply(false)
       }
     },
-    [appendDelta, hasData, mockMode, projectId, schedulePersist],
+    [appendDelta, context.hasData, hasData, mockMode, projectId],
   )
 
   const runAnalyst = async (scenarioId: string) => {
@@ -217,6 +378,22 @@ export function AiAssistantPage() {
     }
   }
 
+  const sendChatMessage = async () => {
+    const text = chatInput.trim()
+    if (!text || isBusy) return
+
+    const userMsg = newMessage('user', text)
+    const history = [...messages, userMsg]
+    setMessages(history)
+    setChatInput('')
+
+    try {
+      await streamAssistantReply(history, { mode: 'chat', context })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Ошибка')
+    }
+  }
+
   const runCoachStep = async () => {
     if (!coachInput.trim()) return
 
@@ -228,7 +405,9 @@ export function AiAssistantPage() {
     const isLast = coachStep >= COACH_STEPS.length - 1
 
     if (!isLast) {
-      setCoachStep((s) => s + 1)
+      const nextStep = coachStep + 1
+      setCoachStep(nextStep)
+      void persistChatRef.current(nextMessages)
       return
     }
 
@@ -243,19 +422,17 @@ export function AiAssistantPage() {
     }
   }
 
-  const resetChat = (nextMode: 'analyst' | 'coach') => {
-    setMode(nextMode)
-    setMessages([])
-    setCoachStep(0)
-    setCoachInput('')
-    setAnalystInput('')
-    setWaitingReply(false)
-  }
-
   const handleAnalystKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (!isBusy && analystInput.trim()) void sendAnalystFollowUp()
+    }
+  }
+
+  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (!isBusy && chatInput.trim()) void sendChatMessage()
     }
   }
 
@@ -283,15 +460,41 @@ export function AiAssistantPage() {
     }
   }
 
-  const showBundleSkeleton = bundleLoading && posts.length === 0
+  const showBundleSkeleton = bundleLoading && posts.length === 0 && mode !== 'chat'
+
+  const activeChat = chatList.find((c) => c.id === activeChatId)
+
+  const modeTitle =
+    mode === 'analyst' ? 'AI-аналитик' : mode === 'coach' ? 'AI-коуч' : 'Свободный чат'
+
+  const modeSubtitle =
+    mode === 'analyst'
+      ? activeChat?.title ?? 'Ответ появляется по мере генерации'
+      : mode === 'coach'
+        ? activeChat?.title ?? `Шаг ${coachStep + 1} из ${COACH_STEPS.length}`
+        : activeChat?.title ?? 'Диалог с контекстом проекта'
+
+  const emptyTitle =
+    mode === 'analyst'
+      ? 'Задайте вопрос данным'
+      : mode === 'coach'
+        ? 'Диалог с коучем'
+        : 'Начните разговор'
+
+  const emptyHint =
+    mode === 'analyst'
+      ? 'Выберите сценарий — ответ будет печататься в чате'
+      : mode === 'coach'
+        ? 'Отвечайте на вопросы, в конце — рекомендации'
+        : 'Спросите о метриках, стратегии, гипотезах или целях проекта'
 
   return (
     <div className="flex h-[calc(100vh-7rem)] min-h-[520px] flex-col gap-4 lg:flex-row">
-      <aside className="flex w-full shrink-0 flex-col gap-4 lg:w-56">
+      <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-72">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">AI-ассистент</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Аналитика и коучинг по вашим метрикам
+            Аналитика, коучинг и свободный диалог
           </p>
         </div>
 
@@ -304,9 +507,17 @@ export function AiAssistantPage() {
 
         <div className="flex gap-2 lg:flex-col">
           <Button
+            variant={mode === 'chat' ? 'default' : 'outline'}
+            className="flex-1 justify-start gap-2 lg:flex-none"
+            onClick={() => switchMode('chat')}
+          >
+            <MessageCircle className="h-4 w-4" />
+            Чат
+          </Button>
+          <Button
             variant={mode === 'analyst' ? 'default' : 'outline'}
             className="flex-1 justify-start gap-2 lg:flex-none"
-            onClick={() => resetChat('analyst')}
+            onClick={() => switchMode('analyst')}
           >
             <BarChart3 className="h-4 w-4" />
             Аналитик
@@ -314,41 +525,66 @@ export function AiAssistantPage() {
           <Button
             variant={mode === 'coach' ? 'default' : 'outline'}
             className="flex-1 justify-start gap-2 lg:flex-none"
-            onClick={() => resetChat('coach')}
+            onClick={() => switchMode('coach')}
           >
             <UserRound className="h-4 w-4" />
             Коуч
           </Button>
         </div>
 
-        {!hasData && !showBundleSkeleton && (
+        <div className="flex max-h-48 min-h-0 flex-1 flex-col border-t border-border/80 pt-3 lg:max-h-none">
+          <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            История
+          </p>
+          <AiChatHistory
+            chats={chatList}
+            activeChatId={activeChatId}
+            loading={chatsLoading}
+            onNewChat={startNewChat}
+            onSelect={(id) => void openChat(id)}
+            onDelete={(id) => void removeChat(id)}
+          />
+        </div>
+
+        {mode === 'chat' && project && (
+          <div className="rounded-xl border border-border/80 bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground lg:mt-auto">
+            <p className="font-medium text-foreground">{project.name}</p>
+            {project.channels.length > 0 && (
+              <p className="mt-1">Каналы: {project.channels.join(', ')}</p>
+            )}
+            {project.optional_goal_text && (
+              <p className="mt-1 line-clamp-3">Цель: {project.optional_goal_text}</p>
+            )}
+            <p className="mt-2">
+              {context.hasData
+                ? `${context.aggregated.postCount} постов · ER ${context.aggregated.avgEr.toFixed(1)}%`
+                : 'Метрики не импортированы'}
+            </p>
+          </div>
+        )}
+
+        {!hasData && !showBundleSkeleton && mode !== 'chat' && (
           <p className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-900">
             Импортируйте CSV, чтобы AI опирался на реальные метрики.
           </p>
         )}
       </aside>
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-card shadow-sm ring-1 ring-border">
-        <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-          <div>
-            <p className="font-medium">
-              {mode === 'analyst' ? 'AI-аналитик' : 'AI-коуч'}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {mode === 'analyst'
-                ? 'Ответ появляется по мере генерации'
-                : `Шаг ${coachStep + 1} из ${COACH_STEPS.length}`}
-            </p>
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-md">
+        <header className="flex shrink-0 items-center justify-between border-b border-border/80 bg-muted/20 px-5 py-3.5">
+          <div className="min-w-0">
+            <p className="truncate font-medium">{modeTitle}</p>
+            <p className="truncate text-xs text-muted-foreground">{modeSubtitle}</p>
           </div>
           {messages.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
-              className="text-xs"
+              className="shrink-0 text-xs"
               disabled={isBusy}
-              onClick={() => resetChat(mode)}
+              onClick={startNewChat}
             >
-              Очистить чат
+              Новый диалог
             </Button>
           )}
         </header>
@@ -364,19 +600,15 @@ export function AiAssistantPage() {
             messages={messages}
             loading={waitingReply}
             loadingLabel={mockMode ? 'Готовим ответ…' : 'Подключаемся к модели…'}
-            emptyTitle={mode === 'analyst' ? 'Задайте вопрос данным' : 'Диалог с коучем'}
-            emptyHint={
-              mode === 'analyst'
-                ? 'Выберите сценарий — ответ будет печататься в чате'
-                : 'Отвечайте на вопросы, в конце — рекомендации'
-            }
+            emptyTitle={emptyTitle}
+            emptyHint={emptyHint}
             onCopy={copyMarkdown}
             onCreateHypothesis={createHypothesisFromMessage}
             showHypothesisAction={mode === 'analyst'}
           />
         )}
 
-        <footer className="shrink-0 border-t border-border bg-muted/30 p-4">
+        <footer className="shrink-0 border-t border-border/80 bg-muted/30 p-4 backdrop-blur-sm">
           {mode === 'analyst' ? (
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
@@ -419,7 +651,7 @@ export function AiAssistantPage() {
                 </div>
               )}
             </div>
-          ) : (
+          ) : mode === 'coach' ? (
             <div className="space-y-3">
               <p className="text-sm font-medium leading-snug text-foreground">
                 {COACH_STEPS[coachStep]}
@@ -444,6 +676,27 @@ export function AiAssistantPage() {
                   <Send className="h-4 w-4" />
                 </Button>
               </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Textarea
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={handleChatKeyDown}
+                placeholder="Напишите сообщение… (Enter — отправить, Shift+Enter — новая строка)"
+                rows={2}
+                className="min-h-[52px] resize-none bg-background"
+                disabled={isBusy || showBundleSkeleton}
+              />
+              <Button
+                size="icon"
+                className="h-[52px] w-[52px] shrink-0"
+                disabled={!chatInput.trim() || isBusy || showBundleSkeleton}
+                onClick={() => void sendChatMessage()}
+                aria-label="Отправить"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
             </div>
           )}
         </footer>

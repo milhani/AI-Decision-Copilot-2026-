@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { subDays } from 'date-fns'
-import { Copy, Download } from 'lucide-react'
+import { Copy, Download, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { useProject } from '@/hooks/useProject'
 import {
@@ -17,6 +17,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { PageHeader } from '@/components/ui/page-header'
+import { PageSkeleton } from '@/components/ui/skeleton'
 
 export function ReportPage() {
   const { id } = useParams<{ id: string }>()
@@ -96,15 +98,15 @@ export function ReportPage() {
     toast.success('Файл скачан')
   }
 
-  if (loading) return <p className="text-muted-foreground">Загрузка…</p>
+  if (loading) return <PageSkeleton />
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Отчёт за период</h1>
-          <p className="text-muted-foreground">Краткая сводка для клиента или команды</p>
-        </div>
+    <div className="mx-auto max-w-3xl space-y-8">
+      <PageHeader
+        title="Отчёт за период"
+        description="Краткая сводка для клиента или команды"
+        icon={FileText}
+      >
         <div className="flex gap-2">
           <Button variant="outline" onClick={copyReport}>
             <Copy className="mr-2 h-4 w-4" />
@@ -115,7 +117,7 @@ export function ReportPage() {
             Скачать .md
           </Button>
         </div>
-      </div>
+      </PageHeader>
 
       <Card>
         <CardContent className="flex flex-wrap gap-4 pt-6">
@@ -145,7 +147,9 @@ export function ReportPage() {
           <CardTitle className="text-base">Предпросмотр</CardTitle>
         </CardHeader>
         <CardContent>
-          <pre className="whitespace-pre-wrap text-sm">{markdown}</pre>
+          <pre className="whitespace-pre-wrap rounded-xl bg-muted/50 p-4 font-mono text-sm leading-relaxed">
+            {markdown}
+          </pre>
         </CardContent>
       </Card>
 

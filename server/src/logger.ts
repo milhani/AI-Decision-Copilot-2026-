@@ -126,7 +126,9 @@ export function logStartup(port: number, cacheTtlMs: number): void {
   console.log(`${esc.cyan}${esc.bold}  SMM Decision Copilot — API${esc.reset}`)
   console.log(`${esc.dim}  ${line}${esc.reset}`)
   console.log(`  ${esc.green}→${esc.reset}  http://localhost:${port}`)
-  console.log(`  ${esc.dim}cache TTL:${esc.reset}  ${cacheTtlMs / 1000}s`)
+  console.log(
+    `  ${esc.dim}cache TTL:${esc.reset}  ${cacheTtlMs > 0 ? `${cacheTtlMs / 1000}s` : 'без срока (до изменений)'}`,
+  )
   console.log(`  ${esc.dim}логи:${esc.reset}     запросы + Σ время + cache + db`)
   console.log(`${esc.dim}  ${line}${esc.reset}`)
   console.log('')

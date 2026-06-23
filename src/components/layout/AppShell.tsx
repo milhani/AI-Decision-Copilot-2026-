@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   BarChart3,
   Bot,
@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   Settings,
+  Sparkles,
   Upload,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -28,21 +29,41 @@ export function AppShell() {
   const { id } = useParams<{ id: string }>()
   const { signOut, user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
 
   return (
     <div className="flex min-h-screen">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
-        <div className="border-b border-border p-4">
-          <Link to="/projects" className="text-sm font-semibold text-primary">
-            AI Decision Copilot
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-border/80 bg-sidebar md:flex">
+        <div className="border-b border-border/80 p-5">
+          <Link to="/projects" className="group flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform duration-200 group-hover:scale-105">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="block text-sm font-bold tracking-tight text-foreground">
+                Decision Copilot
+              </span>
+              <span className="block text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                SMM Analytics
+              </span>
+            </div>
           </Link>
-          <p className="mt-1 truncate text-xs text-muted-foreground">{user?.email}</p>
+          {user?.email && (
+            <p className="mt-3 truncate rounded-lg bg-muted/60 px-2.5 py-1.5 text-xs text-muted-foreground">
+              {user.email}
+            </p>
+          )}
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
+        <nav className="flex-1 space-y-0.5 p-3">
           <Link
             to="/projects"
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            className={cn(
+              'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+              location.pathname === '/projects'
+                ? 'bg-primary/10 text-primary shadow-xs'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            )}
           >
             <FolderKanban className="h-4 w-4" />
             Список проектов
@@ -50,8 +71,8 @@ export function AppShell() {
 
           {id && (
             <>
-              <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Проект
+              <div className="px-3 pt-5 pb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                Текущий проект
               </div>
               {projectNav.map(({ to, label, icon: Icon }) => (
                 <NavLink
@@ -59,9 +80,9 @@ export function AppShell() {
                   to={`/projects/${id}/${to}`}
                   className={({ isActive }) =>
                     cn(
-                      'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
+                      'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-all duration-200',
                       isActive
-                        ? 'bg-primary/10 font-medium text-primary'
+                        ? 'bg-primary/10 font-medium text-primary shadow-xs'
                         : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                     )
                   }
@@ -74,10 +95,10 @@ export function AppShell() {
           )}
         </nav>
 
-        <div className="border-t border-border p-3">
+        <div className="border-t border-border/80 p-3">
           <Button
             variant="ghost"
-            className="w-full justify-start gap-2"
+            className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground"
             onClick={() => {
               signOut()
               navigate('/login')
@@ -91,10 +112,12 @@ export function AppShell() {
 
       <div className="flex flex-1 flex-col">
         {id && (
-          <header className="flex items-center gap-2 border-b border-border bg-card px-4 py-3 md:hidden">
-            <BarChart3 className="h-5 w-5 text-primary" />
+          <header className="flex items-center gap-3 border-b border-border/80 bg-card/80 px-4 py-3 backdrop-blur-sm md:hidden">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <BarChart3 className="h-4 w-4" />
+            </div>
             <select
-              className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-sm"
+              className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/25"
               value={location.pathname}
               onChange={(e) => navigate(e.target.value)}
             >

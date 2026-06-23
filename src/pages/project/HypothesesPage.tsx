@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { differenceInDays, parseISO } from 'date-fns'
-import { Plus, BookOpen } from 'lucide-react'
+import { Plus, BookOpen, FlaskConical } from 'lucide-react'
 import { useProject } from '@/hooks/useProject'
 import { HYPOTHESIS_STATUS_LABELS, ER_CHECKLIST } from '@/lib/constants'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,9 @@ import {
 } from '@/components/ui/select'
 import { formatDate } from '@/lib/utils'
 import type { Hypothesis, HypothesisStatus } from '@/types/database'
+import { PageHeader } from '@/components/ui/page-header'
+import { PageSkeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/empty-state'
 
 export function HypothesesPage() {
   const { id } = useParams<{ id: string }>()
@@ -62,15 +65,15 @@ export function HypothesesPage() {
     return differenceInDays(new Date(), parseISO(h.created_at)) > 14
   })
 
-  if (loading) return <p className="text-muted-foreground">Загрузка…</p>
+  if (loading) return <PageSkeleton />
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Гипотезы</h1>
-          <p className="text-muted-foreground">Реестр экспериментов и база знаний</p>
-        </div>
+    <div className="space-y-8">
+      <PageHeader
+        title="Гипотезы"
+        description="Реестр экспериментов и база знаний"
+        icon={FlaskConical}
+      >
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild>
             <Link to={`/projects/${id}/hypotheses/templates`}>
@@ -85,7 +88,7 @@ export function HypothesesPage() {
             </Link>
           </Button>
         </div>
-      </div>
+      </PageHeader>
 
       {staleTesting.length > 0 && (
         <Card className="border-amber-200 bg-amber-50/50">
@@ -155,10 +158,20 @@ export function HypothesesPage() {
 
       {filtered.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            {view === 'knowledge'
-              ? 'Закрытые гипотезы появятся здесь после завершения экспериментов'
-              : 'Создайте первую гипотезу или выберите шаблон'}
+          <CardContent>
+            <EmptyState
+              icon={FlaskConical}
+              title={
+                view === 'knowledge'
+                  ? 'База знаний пуста'
+                  : 'Пока нет гипотез'
+              }
+              description={
+                view === 'knowledge'
+                  ? 'Закрытые гипотезы появятся здесь после завершения экспериментов'
+                  : 'Создайте первую гипотезу или выберите готовый шаблон'
+              }
+            />
           </CardContent>
         </Card>
       ) : (
@@ -192,7 +205,7 @@ function HypothesisCard({ hypothesis: h, projectId }: { hypothesis: Hypothesis; 
     h.status === 'testing' && differenceInDays(new Date(), parseISO(h.created_at)) > 14
 
   return (
-    <Card>
+    <Card className="transition-all duration-200 hover:border-primary/15 hover:shadow-sm">
       <CardContent className="flex flex-wrap items-start justify-between gap-4 py-4">
         <div>
           <Link

@@ -2,6 +2,7 @@ import 'dotenv/config'
 import cors from 'cors'
 import express from 'express'
 import { requireAuth } from './auth.js'
+import { getProjectCacheTtlMs } from './cache.js'
 import { closeDb } from './db.js'
 import { logStartup, logWarn } from './logger.js'
 import { requestLogger } from './middleware/request-logger.js'
@@ -10,7 +11,7 @@ import { projectsRouter } from './routes/projects.js'
 
 const app = express()
 const port = Number(process.env.PORT ?? 3001)
-const cacheTtlMs = Number(process.env.CACHE_TTL_MS ?? 60_000)
+const cacheTtlMs = getProjectCacheTtlMs()
 
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
   logWarn(

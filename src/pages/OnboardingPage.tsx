@@ -7,9 +7,10 @@ import { updateUserProfile } from '@/lib/profile-api'
 import { createDemoProject } from '@/lib/demo-seed'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 
 export function OnboardingPage() {
-  const { user, refreshProfile } = useAuth()
+  const { user, applyProfile } = useAuth()
   const navigate = useNavigate()
   const [loading, setLoading] = useState<string | null>(null)
 
@@ -20,12 +21,11 @@ export function OnboardingPage() {
     if (!user) return
     setLoading(track)
 
-    await updateUserProfile({
+    const updated = await updateUserProfile({
       onboarding_completed: true,
       onboarding_track: track,
     })
-
-    await refreshProfile()
+    applyProfile(updated)
     setLoading(null)
 
     if (demoProjectId) {
@@ -46,29 +46,41 @@ export function OnboardingPage() {
       setLoading(null)
       return
     }
-    await updateUserProfile({
+    const updated = await updateUserProfile({
       onboarding_completed: true,
       onboarding_track: 'analytics',
     })
-    await refreshProfile()
+    applyProfile(updated)
     setLoading(null)
     toast.success('Демо-проект создан')
     navigate(`/projects/${id}/overview`)
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 py-8">
+    <div className="mx-auto max-w-3xl space-y-10 py-4 page-enter">
       <div className="text-center">
-        <h1 className="text-2xl font-bold">Добро пожаловать в AI Decision Copilot</h1>
-        <p className="mt-2 text-muted-foreground">
-          Платформа для интерпретации метрик и системной работы с гипотезами — не генератор контента.
+        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-glow">
+          <Sparkles className="h-8 w-8" />
+        </div>
+        <h1 className="text-3xl font-bold tracking-tight">
+          Добро пожаловать в Decision Copilot
+        </h1>
+        <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted-foreground">
+          Платформа для интерпретации метрик и системной работы с гипотезами — не генератор
+          контента.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="cursor-pointer transition-shadow hover:shadow-md">
+      <div className="grid gap-5 md:grid-cols-2">
+        <Card
+          className={cn(
+            'group cursor-pointer border-border/80 transition-all duration-200 hover:border-primary/25 hover:shadow-md',
+          )}
+        >
           <CardHeader>
-            <BarChart3 className="mb-2 h-8 w-8 text-primary" />
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-transform duration-200 group-hover:scale-105">
+              <BarChart3 className="h-5 w-5" />
+            </div>
             <CardTitle>Разобраться в цифрах</CardTitle>
             <CardDescription>Импорт CSV, дашборд, аномалии и AI-аналитик</CardDescription>
           </CardHeader>
@@ -83,9 +95,15 @@ export function OnboardingPage() {
           </CardContent>
         </Card>
 
-        <Card className="cursor-pointer transition-shadow hover:shadow-md">
+        <Card
+          className={cn(
+            'group cursor-pointer border-border/80 transition-all duration-200 hover:border-primary/25 hover:shadow-md',
+          )}
+        >
           <CardHeader>
-            <FlaskConical className="mb-2 h-8 w-8 text-primary" />
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-secondary text-secondary-foreground transition-transform duration-200 group-hover:scale-105">
+              <FlaskConical className="h-5 w-5" />
+            </div>
             <CardTitle>Завести первую гипотезу</CardTitle>
             <CardDescription>Шаблоны экспериментов и реестр гипотез</CardDescription>
           </CardHeader>
@@ -102,9 +120,11 @@ export function OnboardingPage() {
         </Card>
       </div>
 
-      <Card className="border-dashed border-primary/40 bg-primary/5">
+      <Card className="border-dashed border-primary/30 bg-gradient-to-br from-primary/5 to-transparent">
         <CardHeader>
-          <Sparkles className="mb-2 h-6 w-6 text-primary" />
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Sparkles className="h-5 w-5" />
+          </div>
           <CardTitle>Демо-проект</CardTitle>
           <CardDescription>
             «Демо: Косметика бренд» — 10 постов, метрики за 90 дней и 2 гипотезы

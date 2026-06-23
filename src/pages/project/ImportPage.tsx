@@ -13,6 +13,7 @@ import type { ParsedRow } from '@/lib/import'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   Select,
   SelectContent,
@@ -123,11 +124,12 @@ export function ImportPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Импорт данных</h1>
-        <p className="text-muted-foreground">CSV или XLSX — разбор и запись через API</p>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-8">
+      <PageHeader
+        title="Импорт данных"
+        description="CSV или XLSX — разбор и запись через API"
+        icon={Upload}
+      />
 
       {lastError && (
         <Card className="border-destructive/30 bg-red-50/50">
@@ -137,23 +139,30 @@ export function ImportPage() {
 
       {step === 'upload' && (
         <Card>
-          <CardContent className="flex flex-col items-center py-12">
-            <Upload className="mb-4 h-12 w-12 text-muted-foreground" />
-            <p className="mb-4 text-center text-muted-foreground">
-              Перетащите файл или выберите CSV/XLSX
-            </p>
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              className="text-sm"
-              disabled={parsing}
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) handleFile(f)
-              }}
-            />
+          <CardContent className="py-8">
+            <label
+              className="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 px-6 py-14 transition-all duration-200 hover:border-primary/40 hover:bg-primary/5"
+            >
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Upload className="h-7 w-7" />
+              </div>
+              <p className="text-base font-medium">Перетащите файл или нажмите для выбора</p>
+              <p className="mt-1 text-sm text-muted-foreground">Поддерживаются CSV, XLSX, XLS</p>
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="sr-only"
+                disabled={parsing}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) handleFile(f)
+                }}
+              />
+            </label>
             {parsing && (
-              <p className="mt-4 text-sm text-muted-foreground">Разбор файла на сервере…</p>
+              <p className="mt-4 text-center text-sm text-muted-foreground">
+                Разбор файла на сервере…
+              </p>
             )}
           </CardContent>
         </Card>

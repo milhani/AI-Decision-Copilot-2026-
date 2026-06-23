@@ -1,25 +1,185 @@
 import { fetchWithAuth } from '@/lib/api-client'
 import { HttpResponseError, backoffMs, isRetryableHttpStatus, sleep } from '@/lib/fetch-retry'
 import { ensureFreshAccessToken } from '@/lib/auth-session'
-import type { AiMessage } from '@/types/database'
+import type { AiChatSnapshot, AiMessage, AiMode, AiSession } from '@/types/database'
 
 const STREAM_MAX_ATTEMPTS = 3
+const CHAT_LIST_CACHE_KEY = 'smm:ai-chat-list'
 
+const listInflight = new Map<string, Promise<AiSession[]>>()
+
+function listCacheKey(projectId: string, mode?: AiMode): string {
+  return `${projectId}:${mode ?? 'all'}`
+}
+
+type ChatListCacheEntry = { chats: AiSession[]; fetched: boolean }
+
+function readAllChatListCaches(): Record<string, ChatListCacheEntry> {
+  try {
+    const raw = sessionStorage.getItem(CHAT_LIST_CACHE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, ChatListCacheEntry | AiSession[]>
+    const out: Record<string, ChatListCacheEntry> = {}
+    for (const [key, val] of Object.entries(parsed)) {
+      if (Array.isArray(val)) {
+        out[key] = { chats: val, fetched: val.length > 0 }
+      } else if (val && Array.isArray(val.chats)) {
+        out[key] = { chats: val.chats, fetched: Boolean(val.fetched) }
+      }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+export function readChatListCache(projectId: string, mode?: AiMode): AiSession[] | null {
+  const all = readAllChatListCaches()
+  const entry = all[listCacheKey(projectId, mode)]
+  return entry?.fetched ? entry.chats : null
+}
+
+export function writeChatListCache(
+  projectId: string,
+  mode: AiMode | undefined,
+  chats: AiSession[],
+): void {
+  try {
+    const all = readAllChatListCaches()
+    all[listCacheKey(projectId, mode)] = { chats, fetched: true }
+    sessionStorage.setItem(CHAT_LIST_CACHE_KEY, JSON.stringify(all))
+  } catch {
+    // ignore
+  }
+}
+
+export function upsertChatListItem(
+  projectId: string,
+  mode: AiMode,
+  chat: AiSession,
+): void {
+  const cached = readChatListCache(projectId, mode) ?? []
+  const idx = cached.findIndex((c) => c.id === chat.id)
+  const next = [...cached]
+  if (idx === -1) {
+    next.unshift(chat)
+  } else {
+    next[idx] = chat
+  }
+  next.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  writeChatListCache(projectId, mode, next)
+}
+
+export function removeChatListItem(projectId: string, mode: AiMode, chatId: string): void {
+  const cached = readChatListCache(projectId, mode)
+  if (!cached) return
+  writeChatListCache(
+    projectId,
+    mode,
+    cached.filter((c) => c.id !== chatId),
+  )
+}
+
+export async function listAiChats(
+  projectId: string,
+  mode?: AiMode,
+  refresh = false,
+): Promise<AiSession[]> {
+  const key = listCacheKey(projectId, mode)
+
+  if (!refresh) {
+    const cached = readChatListCache(projectId, mode)
+    if (cached) return cached
+
+    if (listInflight.has(key)) {
+      return listInflight.get(key)!
+    }
+  } else if (listInflight.has(key)) {
+    return listInflight.get(key)!
+  }
+
+  const qs = new URLSearchParams()
+  if (mode) qs.set('mode', mode)
+  if (refresh) qs.set('refresh', '1')
+  const query = qs.toString() ? `?${qs}` : ''
+
+  const task = (async () => {
+    const res = await fetchWithAuth(`/api/projects/${projectId}/ai/chats${query}`)
+    const chats = (await res.json()) as AiSession[]
+    writeChatListCache(projectId, mode, chats)
+    return chats
+  })()
+
+  listInflight.set(key, task)
+  try {
+    return await task
+  } finally {
+    listInflight.delete(key)
+  }
+}
+
+export async function getAiChat(projectId: string, chatId: string): Promise<AiSession> {
+  const res = await fetchWithAuth(`/api/projects/${projectId}/ai/chats/${chatId}`)
+  return res.json() as Promise<AiSession>
+}
+
+export async function createAiChat(
+  projectId: string,
+  payload: {
+    mode: AiMode
+    messages?: AiMessage[]
+    title?: string
+    context_snapshot?: AiChatSnapshot | null
+  },
+): Promise<AiSession> {
+  const res = await fetchWithAuth(
+    `/api/projects/${projectId}/ai/chats`,
+    { method: 'POST' },
+    { getBody: () => JSON.stringify(payload) },
+  )
+  const chat = (await res.json()) as AiSession
+  upsertChatListItem(projectId, payload.mode, chat)
+  return chat
+}
+
+export async function updateAiChat(
+  projectId: string,
+  chatId: string,
+  payload: {
+    mode?: AiMode
+    messages?: AiMessage[]
+    title?: string
+    context_snapshot?: AiChatSnapshot | null
+  },
+): Promise<AiSession> {
+  const res = await fetchWithAuth(
+    `/api/projects/${projectId}/ai/chats/${chatId}`,
+    { method: 'PUT' },
+    { getBody: () => JSON.stringify(payload) },
+  )
+  const chat = (await res.json()) as AiSession
+  if (payload.mode ?? chat.mode) {
+    upsertChatListItem(projectId, payload.mode ?? chat.mode, chat)
+  }
+  return chat
+}
+
+export async function deleteAiChat(
+  projectId: string,
+  chatId: string,
+  mode?: AiMode,
+): Promise<void> {
+  await fetchWithAuth(`/api/projects/${projectId}/ai/chats/${chatId}`, { method: 'DELETE' })
+  if (mode) removeChatListItem(projectId, mode, chatId)
+}
+
+/** @deprecated */
 export async function saveAiSession(
   projectId: string,
   mode: string,
   messages: AiMessage[],
 ): Promise<void> {
-  const body = JSON.stringify({ mode, messages })
-  const res = await fetchWithAuth(
-    `/api/projects/${projectId}/ai/sessions`,
-    { method: 'POST' },
-    { getBody: () => body },
-  )
-  const parsed = (await res.json().catch(() => ({}))) as { ok?: boolean; warning?: string }
-  if (parsed.warning) {
-    console.warn('[saveAiSession]', parsed.warning)
-  }
+  await createAiChat(projectId, { mode: mode as AiMode, messages, context_snapshot: null })
 }
 
 export type StreamAiHandlers = {
@@ -137,10 +297,7 @@ export async function streamAiAssistant(
         throw error
       }
 
-      if (
-        error instanceof HttpResponseError &&
-        error.status === 401
-      ) {
+      if (error instanceof HttpResponseError && error.status === 401) {
         await ensureFreshAccessToken()
       }
 

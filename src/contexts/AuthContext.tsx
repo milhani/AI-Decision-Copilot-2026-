@@ -8,10 +8,21 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { AuthChangeEvent, Session, User } from '@supabase/supabase-js'
-import { markSessionReady, resetSessionReady, setAccessToken } from '@/lib/auth-session'
+import type { Session, User } from '@supabase/supabase-js'
+import {
+  bootstrapAuthSession,
+  markSessionReady,
+  onAccessTokenChange,
+  resetSessionReady,
+  setAccessToken,
+} from '@/lib/auth-session'
 import { supabase } from '@/lib/supabase'
-import { fetchUserProfile } from '@/lib/profile-api'
+import {
+  clearProfileCache,
+  fetchUserProfile,
+  readProfileCache,
+  writeProfileCache,
+} from '@/lib/profile-api'
 import type { UserProfile } from '@/types/database'
 
 interface AuthContextValue {
@@ -23,23 +34,10 @@ interface AuthContextValue {
   signUp: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
+  applyProfile: (profile: UserProfile) => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
-
-function shouldFetchProfile(event: AuthChangeEvent): boolean {
-  return event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'USER_UPDATED'
-}
-
-async function ensureSessionFresh(s: Session): Promise<Session> {
-  const expiresAt = s.expires_at ?? 0
-  const skewMs = 60_000
-  if (expiresAt * 1000 >= Date.now() + skewMs) return s
-
-  const { data, error } = await supabase.auth.refreshSession()
-  if (error || !data.session) return s
-  return data.session
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
@@ -50,31 +48,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const profileUserIdRef = useRef<string | null>(null)
   const profileLoadRef = useRef<Promise<void> | null>(null)
 
-  const loadProfile = useCallback(async (userId: string, refresh = false) => {
-    if (!refresh && profileUserIdRef.current === userId) {
-      return
-    }
-
-    if (profileLoadRef.current) {
-      await profileLoadRef.current
-      if (!refresh && profileUserIdRef.current === userId) return
-    }
-
-    const task = (async () => {
-      try {
-        const data = await fetchUserProfile(refresh)
-        setProfile(data)
-        profileUserIdRef.current = userId
-      } catch (e) {
-        console.error('[AuthContext] profile', e)
-      } finally {
-        profileLoadRef.current = null
-      }
-    })()
-
-    profileLoadRef.current = task
-    await task
+  const applySession = useCallback((s: Session | null) => {
+    setSession(s)
+    setUser(s?.user ?? null)
+    setAccessToken(s?.access_token ?? null)
+    markSessionReady()
   }, [])
+
+  const applyProfile = useCallback((data: UserProfile) => {
+    setProfile(data)
+    profileUserIdRef.current = data.id
+    writeProfileCache(data.id, data)
+  }, [])
+
+  const loadProfile = useCallback(
+    async (userId: string, refresh = false) => {
+      if (!refresh && profileUserIdRef.current === userId) {
+        return
+      }
+
+      if (profileLoadRef.current) {
+        await profileLoadRef.current
+        if (!refresh && profileUserIdRef.current === userId) return
+      }
+
+      const task = (async () => {
+        try {
+          const data = await fetchUserProfile(refresh)
+          if (data) {
+            applyProfile(data)
+          } else {
+            setProfile(null)
+            profileUserIdRef.current = userId
+          }
+        } catch (e) {
+          console.error('[AuthContext] profile', e)
+        } finally {
+          profileLoadRef.current = null
+        }
+      })()
+
+      profileLoadRef.current = task
+      await task
+    },
+    [applyProfile],
+  )
 
   const refreshProfile = useCallback(async () => {
     if (!user?.id) return
@@ -83,52 +101,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile, user?.id])
 
   useEffect(() => {
-    let active = true
+    let mounted = true
 
-    const applySession = (s: Session | null) => {
-      setSession(s)
-      setUser(s?.user ?? null)
-      setAccessToken(s?.access_token ?? null)
-      if (s?.access_token) markSessionReady()
-    }
+    void (async () => {
+      try {
+        const bootSession = await bootstrapAuthSession()
+        if (!mounted) return
+
+        if (!bootSession?.user) {
+          applySession(null)
+          return
+        }
+
+        applySession(bootSession)
+
+        const cached = readProfileCache(bootSession.user.id)
+        if (cached) {
+          setProfile(cached)
+          profileUserIdRef.current = bootSession.user.id
+        }
+
+        await loadProfile(bootSession.user.id)
+      } catch (e) {
+        console.error('[AuthContext] bootstrap', e)
+        if (mounted) applySession(null)
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    })()
+
+    const unsubscribeToken = onAccessTokenChange((token) => {
+      if (!token) return
+      setSession((prev) => (prev ? { ...prev, access_token: token } : prev))
+    })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
-      if (!active) return
+      if (event === 'INITIAL_SESSION') return
 
       void (async () => {
         if (!s?.user) {
-          applySession(null)
-          setProfile(null)
-          profileUserIdRef.current = null
-          setLoading(false)
+          if (event === 'SIGNED_OUT') {
+            applySession(null)
+            setProfile(null)
+            profileUserIdRef.current = null
+            clearProfileCache()
+          }
           return
         }
 
-        const fresh =
-          event === 'INITIAL_SESSION' || event === 'SIGNED_IN'
-            ? await ensureSessionFresh(s)
-            : s
+        applySession(s)
 
-        applySession(fresh)
-
-        if (event === 'TOKEN_REFRESHED') {
-          setLoading(false)
-          return
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+          await loadProfile(s.user.id, event === 'USER_UPDATED')
         }
-
-        if (shouldFetchProfile(event)) {
-          await loadProfile(fresh.user.id)
-        }
-
-        if (active) setLoading(false)
       })()
     })
 
     return () => {
-      active = false
+      mounted = false
+      unsubscribeToken()
       subscription.unsubscribe()
     }
-  }, [loadProfile])
+  }, [applySession, loadProfile])
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -144,13 +178,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
     setProfile(null)
     profileUserIdRef.current = null
+    clearProfileCache()
     resetSessionReady()
     setAccessToken(null)
+    setSession(null)
+    setUser(null)
   }
 
   const value = useMemo(
-    () => ({ user, session, profile, loading, signIn, signUp, signOut, refreshProfile }),
-    [user, session, profile, loading, refreshProfile],
+    () => ({
+      user,
+      session,
+      profile,
+      loading,
+      signIn,
+      signUp,
+      signOut,
+      refreshProfile,
+      applyProfile,
+    }),
+    [user, session, profile, loading, refreshProfile, applyProfile],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

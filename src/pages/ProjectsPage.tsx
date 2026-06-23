@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, Trash2, Pencil } from 'lucide-react'
+import { Plus, Trash2, Pencil, FolderKanban } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -22,6 +22,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { PageHeader } from '@/components/ui/page-header'
+import { PageSkeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 
 export function ProjectsPage() {
   const { user, profile } = useAuth()
@@ -153,59 +158,79 @@ export function ProjectsPage() {
   }
 
   if (loading) {
-    return <p className="text-muted-foreground">Загрузка проектов…</p>
+    return (
+      <div className="mx-auto max-w-5xl">
+        <PageSkeleton />
+      </div>
+    )
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Проекты</h1>
-          <p className="text-muted-foreground">
-            {projects.length} / {MAX_PROJECTS} проектов
-          </p>
-        </div>
+    <div className="mx-auto max-w-5xl space-y-8">
+      <PageHeader
+        title="Проекты"
+        description={`${projects.length} из ${MAX_PROJECTS} проектов`}
+        icon={FolderKanban}
+      >
         <Button onClick={openCreate} className="gap-2">
           <Plus className="h-4 w-4" />
           Новый проект
         </Button>
-      </div>
+      </PageHeader>
 
       {projects.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">Пока нет проектов</p>
-            <Button className="mt-4" onClick={openCreate}>
-              Создать первый проект
-            </Button>
+          <CardContent>
+            <EmptyState
+              icon={FolderKanban}
+              title="Пока нет проектов"
+              description="Создайте первый проект, чтобы импортировать метрики и тестировать гипотезы"
+            >
+              <Button onClick={openCreate} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Создать первый проект
+              </Button>
+            </EmptyState>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((p) => (
-            <Card key={p.id} className="flex flex-col">
-              <CardHeader>
-                <CardTitle className="text-base">
-                  <Link to={`/projects/${p.id}/overview`} className="hover:text-primary">
+            <Card
+              key={p.id}
+              className={cn(
+                'group flex flex-col transition-all duration-200 hover:border-primary/20 hover:shadow-md',
+              )}
+            >
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base leading-snug">
+                  <Link
+                    to={`/projects/${p.id}/overview`}
+                    className="transition-colors hover:text-primary"
+                  >
                     {p.name}
                   </Link>
                   {p.is_demo && (
-                    <span className="ml-2 text-xs font-normal text-primary">Демо</span>
+                    <Badge variant="secondary" className="ml-2 align-middle text-[10px]">
+                      Демо
+                    </Badge>
                   )}
                 </CardTitle>
                 <CardDescription className="line-clamp-2">
                   {p.description || 'Без описания'}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="mt-auto flex gap-2">
-                <div className="flex flex-wrap gap-1">
-                  {p.channels.map((c) => (
-                    <span key={c} className="rounded bg-muted px-2 py-0.5 text-xs">
-                      {c}
-                    </span>
-                  ))}
-                </div>
-                <div className="ml-auto flex gap-1">
+              <CardContent className="mt-auto space-y-3">
+                {p.channels.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {p.channels.map((c) => (
+                      <Badge key={c} variant="outline" className="text-[10px] font-normal">
+                        {c}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end gap-1 opacity-60 transition-opacity group-hover:opacity-100">
                   <Button size="icon" variant="ghost" onClick={() => openEdit(p)}>
                     <Pencil className="h-4 w-4" />
                   </Button>

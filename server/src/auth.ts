@@ -88,10 +88,5 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
     return
   }
 
-  res.status(401).json({
-    error:
-      local.reason === 'expired'
-        ? 'Сессия истекла — обновите страницу или войдите снова'
-        : 'Недействительный токен',
-  })
+  res.status(401).json({ error: 'Недействительный токен' })
 }

@@ -1,7 +1,30 @@
 import { Router, type Response } from 'express'
-import { getCachedProject, invalidateProject, setCachedProject } from '../cache.js'
+import {
+  getCachedProject,
+  getCachedAiChat,
+  getCachedAiChatsList,
+  invalidateProject,
+  markProjectOwned,
+  refreshProjectCache,
+  removeCachedAiChat,
+  seedEmptyProjectCache,
+  setCachedAiChat,
+  setCachedAiChatsList,
+  setCachedProject,
+  updateCachedPostNote,
+  updateCachedProjectMeta,
+  upsertCachedHypothesis,
+} from '../cache.js'
 import { runAiChat, streamAiChat, type AiChatRequest } from '../ai/llm.js'
-import { saveAiSession } from '../db/ai-sessions.js'
+import {
+  saveAiSession,
+  createAiChat,
+  updateAiChat,
+  deleteAiChat,
+  getAiChat,
+  listAiChats,
+  toApiListItem,
+} from '../db/ai-sessions.js'
 import { assertProjectOwner } from '../db/ownership.js'
 import { createDemoProject } from '../db/demo-seed.js'
 import {
@@ -51,7 +74,11 @@ function sendDbError(res: Response, e: unknown, label: string) {
 
 projectsRouter.get('/', async (req: AuthedRequest, res) => {
   try {
-    const { projects, dbMs } = await listProjects(req.userId!)
+    const userId = req.userId!
+    const { projects, dbMs } = await listProjects(userId)
+    for (const project of projects) {
+      markProjectOwned(userId, project.id)
+    }
     res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
     res.json(projects)
   } catch (e) {
@@ -62,7 +89,7 @@ projectsRouter.get('/', async (req: AuthedRequest, res) => {
 projectsRouter.post('/demo', async (req: AuthedRequest, res) => {
   try {
     const { projectId, dbMs } = await createDemoProject(req.userId!)
-    invalidateProject(req.userId!, projectId)
+    await refreshProjectCache(req.userId!, projectId)
     res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
     res.status(201).json({ projectId })
   } catch (e) {
@@ -86,6 +113,7 @@ projectsRouter.post('/', async (req: AuthedRequest, res) => {
       optional_goal_text: body.optional_goal_text ?? null,
       optional_kpi_list: body.optional_kpi_list ?? null,
     })
+    seedEmptyProjectCache(req.userId!, project)
     res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
     res.status(201).json(project)
   } catch (e) {
@@ -139,18 +167,29 @@ projectsRouter.post('/:projectId/invalidate-cache', (req: AuthedRequest, res) =>
 })
 
 projectsRouter.get('/:projectId', async (req: AuthedRequest, res) => {
+  const userId = req.userId!
   const projectId = String(req.params.projectId)
   if (!isUuid(projectId)) {
     res.status(400).json({ error: 'Некорректный projectId' })
     return
   }
 
+  const cached = getCachedProject(userId, projectId)
+  if (cached) {
+    res.setHeader('X-Cache', 'HIT')
+    res.setHeader('X-Db-Time-Ms', '0')
+    res.json(cached.project)
+    return
+  }
+
   try {
-    const { project, dbMs } = await getProject(projectId, req.userId!)
+    const { project, dbMs } = await getProject(projectId, userId)
     if (!project) {
       res.status(404).json({ error: 'Проект не найден' })
       return
     }
+    markProjectOwned(userId, project.id)
+    res.setHeader('X-Cache', 'MISS')
     res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
     res.json(project)
   } catch (e) {
@@ -172,7 +211,8 @@ projectsRouter.patch('/:projectId', async (req: AuthedRequest, res) => {
   }
 
   try {
-    const { project, dbMs } = await updateProject(projectId, req.userId!, {
+    const userId = req.userId!
+    const { project, dbMs } = await updateProject(projectId, userId, {
       name: body.name.trim(),
       description: body.description ?? null,
       niche_tags: body.niche_tags ?? [],
@@ -180,7 +220,7 @@ projectsRouter.patch('/:projectId', async (req: AuthedRequest, res) => {
       optional_goal_text: body.optional_goal_text ?? null,
       optional_kpi_list: body.optional_kpi_list ?? null,
     })
-    invalidateProject(req.userId!, projectId)
+    updateCachedProjectMeta(userId, projectId, project)
     res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
     res.json(project)
   } catch (e) {
@@ -216,13 +256,14 @@ projectsRouter.patch('/:projectId/posts/:postId', async (req: AuthedRequest, res
   const { manual_note } = req.body as { manual_note?: string | null }
 
   try {
+    const userId = req.userId!
     const { dbMs } = await updatePostNote(
       projectId,
       postId,
-      req.userId!,
+      userId,
       manual_note ?? null,
     )
-    invalidateProject(req.userId!, projectId)
+    updateCachedPostNote(userId, projectId, postId, manual_note ?? null)
     res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
     res.json({ ok: true })
   } catch (e) {
@@ -269,11 +310,12 @@ projectsRouter.post('/:projectId/hypotheses', async (req: AuthedRequest, res) =>
   }
 
   try {
-    const { hypothesis, dbMs } = await createHypothesis(projectId, req.userId!, {
+    const userId = req.userId!
+    const { hypothesis, dbMs } = await createHypothesis(projectId, userId, {
       ...body,
       title: body.title.trim(),
     })
-    invalidateProject(req.userId!, projectId)
+    upsertCachedHypothesis(userId, projectId, hypothesis)
     res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
     res.status(201).json(hypothesis)
   } catch (e) {
@@ -292,13 +334,14 @@ projectsRouter.patch('/:projectId/hypotheses/:hypothesisId', async (req: AuthedR
   const body = req.body as HypothesisWritePayload
 
   try {
+    const userId = req.userId!
     const { hypothesis, dbMs } = await updateHypothesis(
       projectId,
       hypothesisId,
-      req.userId!,
+      userId,
       body,
     )
-    invalidateProject(req.userId!, projectId)
+    upsertCachedHypothesis(userId, projectId, hypothesis)
     res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
     res.json(hypothesis)
   } catch (e) {
@@ -357,6 +400,165 @@ projectsRouter.post('/:projectId/ai/chat', async (req: AuthedRequest, res) => {
       return
     }
     sendDbError(res, e, `POST ai/chat`)
+  }
+})
+
+projectsRouter.get('/:projectId/ai/chats', async (req: AuthedRequest, res) => {
+  const projectId = String(req.params.projectId)
+  if (!isUuid(projectId)) {
+    res.status(400).json({ error: 'Некорректный projectId' })
+    return
+  }
+
+  const userId = req.userId!
+  const mode = typeof req.query.mode === 'string' ? req.query.mode : undefined
+  const forceRefresh = req.query.refresh === '1'
+
+  if (!forceRefresh) {
+    const cached = getCachedAiChatsList(userId, projectId)
+    if (cached) {
+      const filtered = mode ? cached.filter((c) => c.mode === mode) : cached
+      res.setHeader('X-Cache', 'HIT')
+      res.setHeader('X-Db-Time-Ms', '0')
+      res.json(filtered.map(toApiListItem))
+      return
+    }
+  }
+
+  try {
+    const { chats, dbMs } = await listAiChats(projectId, userId, mode)
+    if (!mode) {
+      setCachedAiChatsList(userId, projectId, chats)
+    } else {
+      const existing = getCachedAiChatsList(userId, projectId) ?? []
+      const merged = new Map(existing.map((c) => [c.id, c]))
+      for (const chat of chats) merged.set(chat.id, chat)
+      setCachedAiChatsList(
+        userId,
+        projectId,
+        [...merged.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+      )
+    }
+
+    res.setHeader('X-Cache', forceRefresh ? 'REFRESH' : 'MISS')
+    res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
+    res.json(chats.map(toApiListItem))
+  } catch (e) {
+    sendDbError(res, e, 'GET ai/chats')
+  }
+})
+
+projectsRouter.get('/:projectId/ai/chats/:chatId', async (req: AuthedRequest, res) => {
+  const projectId = String(req.params.projectId)
+  const chatId = String(req.params.chatId)
+  if (!isUuid(projectId) || !isUuid(chatId)) {
+    res.status(400).json({ error: 'Некорректный id' })
+    return
+  }
+
+  const userId = req.userId!
+  const forceRefresh = req.query.refresh === '1'
+
+  if (!forceRefresh) {
+    const cached = getCachedAiChat(userId, projectId, chatId)
+    if (cached) {
+      res.setHeader('X-Cache', 'HIT')
+      res.setHeader('X-Db-Time-Ms', '0')
+      res.json(cached)
+      return
+    }
+  }
+
+  try {
+    const { chat, dbMs } = await getAiChat(projectId, userId, chatId)
+    setCachedAiChat(userId, chat)
+    res.setHeader('X-Cache', forceRefresh ? 'REFRESH' : 'MISS')
+    res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
+    res.json(chat)
+  } catch (e) {
+    sendDbError(res, e, `GET ai/chats/${chatId}`)
+  }
+})
+
+projectsRouter.post('/:projectId/ai/chats', async (req: AuthedRequest, res) => {
+  const projectId = String(req.params.projectId)
+  if (!isUuid(projectId)) {
+    res.status(400).json({ error: 'Некорректный projectId' })
+    return
+  }
+
+  const body = req.body as {
+    mode?: string
+    messages?: unknown
+    title?: string
+    context_snapshot?: unknown
+  }
+
+  if (!body?.mode) {
+    res.status(400).json({ error: 'Укажите mode' })
+    return
+  }
+
+  try {
+    const { chat, dbMs } = await createAiChat(projectId, req.userId!, {
+      mode: body.mode,
+      messages: body.messages,
+      title: body.title,
+      context_snapshot: body.context_snapshot as { aiContext: unknown; coachStep?: number } | null,
+    })
+    setCachedAiChat(req.userId!, chat)
+    res.setHeader('X-Cache', 'MISS')
+    res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
+    res.status(201).json(chat)
+  } catch (e) {
+    sendDbError(res, e, 'POST ai/chats')
+  }
+})
+
+projectsRouter.put('/:projectId/ai/chats/:chatId', async (req: AuthedRequest, res) => {
+  const projectId = String(req.params.projectId)
+  const chatId = String(req.params.chatId)
+  if (!isUuid(projectId) || !isUuid(chatId)) {
+    res.status(400).json({ error: 'Некорректный id' })
+    return
+  }
+
+  const body = req.body as {
+    messages?: unknown
+    title?: string
+    context_snapshot?: unknown
+  }
+
+  try {
+    const { chat, dbMs } = await updateAiChat(projectId, req.userId!, chatId, {
+      messages: body.messages,
+      title: body.title,
+      context_snapshot: body.context_snapshot as { aiContext: unknown; coachStep?: number } | null,
+    })
+    setCachedAiChat(req.userId!, chat)
+    res.setHeader('X-Cache', 'MISS')
+    res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
+    res.json(chat)
+  } catch (e) {
+    sendDbError(res, e, `PUT ai/chats/${chatId}`)
+  }
+})
+
+projectsRouter.delete('/:projectId/ai/chats/:chatId', async (req: AuthedRequest, res) => {
+  const projectId = String(req.params.projectId)
+  const chatId = String(req.params.chatId)
+  if (!isUuid(projectId) || !isUuid(chatId)) {
+    res.status(400).json({ error: 'Некорректный id' })
+    return
+  }
+
+  try {
+    const { dbMs } = await deleteAiChat(projectId, req.userId!, chatId)
+    removeCachedAiChat(req.userId!, projectId, chatId)
+    res.setHeader('X-Db-Time-Ms', String(Math.round(dbMs)))
+    res.status(204).end()
+  } catch (e) {
+    sendDbError(res, e, `DELETE ai/chats/${chatId}`)
   }
 })
 

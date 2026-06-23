@@ -41,6 +41,7 @@ export default function App() {
             <Route path="/projects/:id/hypotheses/templates" element={<HypothesisTemplatesPage />} />
             <Route path="/projects/:id/hypotheses/:hypothesisId/edit" element={<HypothesisFormPage />} />
             <Route path="/projects/:id/ai" element={<AiAssistantPage />} />
+            <Route path="/projects/:id/chat" element={<Navigate to="../ai" replace />} />
             <Route path="/projects/:id/report" element={<ReportPage />} />
             <Route path="/projects/:id/settings" element={<SettingsPage />} />
           </Route>

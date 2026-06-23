@@ -1,4 +1,4 @@
-import type { Hypothesis, PostWithMetrics } from '@/types/database'
+import type { Hypothesis, PostWithMetrics, Project } from '@/types/database'
 import { aggregatePeriod, filterPostsByPeriod } from '@/lib/analytics'
 
 export function buildAiContext(
@@ -6,6 +6,7 @@ export function buildAiContext(
   hypotheses: Hypothesis[],
   from: Date,
   to: Date,
+  project?: Project | null,
 ) {
   const periodPosts = filterPostsByPeriod(posts, from, to)
   const metrics = aggregatePeriod(periodPosts)
@@ -27,6 +28,17 @@ export function buildAiContext(
     }))
 
   return {
+    project: project
+      ? {
+          name: project.name,
+          description: project.description,
+          niche_tags: project.niche_tags,
+          channels: project.channels,
+          goal: project.optional_goal_text,
+          kpi: project.optional_kpi_list,
+          is_demo: project.is_demo,
+        }
+      : null,
     period: { from: from.toISOString(), to: to.toISOString() },
     aggregated: metrics,
     topPosts: top5,

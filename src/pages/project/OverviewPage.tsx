@@ -10,7 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, LayoutDashboard, Upload } from 'lucide-react'
 import { useProject } from '@/hooks/useProject'
 import {
   aggregatePeriod,
@@ -31,6 +31,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { updatePostNote } from '@/lib/posts-api'
 import { toast } from 'sonner'
 import type { PostWithMetrics } from '@/types/database'
+import { PageHeader } from '@/components/ui/page-header'
+import { PageSkeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/empty-state'
+
+const CHART_PRIMARY = '#4f46e5'
+const CHART_SUCCESS = '#059669'
 
 export function OverviewPage() {
   const { id } = useParams<{ id: string }>()
@@ -88,30 +94,40 @@ export function OverviewPage() {
     }
   }
 
-  if (loading) return <p className="text-muted-foreground">Загрузка…</p>
+  if (loading) return <PageSkeleton />
 
   if (!posts.length) {
     return (
-      <Card>
-        <CardContent className="py-12 text-center">
-          <p className="text-lg font-medium">Нет данных для аналитики</p>
-          <p className="mt-2 text-muted-foreground">
-            Импортируйте CSV/XLSX с метриками постов, чтобы увидеть графики и аномалии.
-          </p>
-          <Button className="mt-4" asChild>
-            <Link to={`/projects/${id}/import`}>Перейти к импорту</Link>
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <PageHeader
+          title={project?.name ?? 'Обзор'}
+          description="Аналитика и аномалии по периоду"
+          icon={LayoutDashboard}
+        />
+        <Card>
+          <CardContent>
+            <EmptyState
+              icon={Upload}
+              title="Нет данных для аналитики"
+              description="Импортируйте CSV/XLSX с метриками постов, чтобы увидеть графики и аномалии"
+            >
+              <Button asChild>
+                <Link to={`/projects/${id}/import`}>Перейти к импорту</Link>
+              </Button>
+            </EmptyState>
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">{project?.name ?? 'Обзор'}</h1>
-        <p className="text-muted-foreground">Аналитика и аномалии по периоду</p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        title={project?.name ?? 'Обзор'}
+        description="Аналитика и аномалии по периоду"
+        icon={LayoutDashboard}
+      />
 
       <Card>
         <CardContent className="flex flex-wrap items-end gap-4 pt-6">
@@ -143,22 +159,32 @@ export function OverviewPage() {
       </Card>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
+        <Card className="metric-card-reach overflow-hidden">
           <CardHeader className="pb-2">
-            <CardDescription>Средний охват</CardDescription>
-            <CardTitle>{formatNumber(metrics.avgReach, 0)}</CardTitle>
+            <CardDescription className="text-xs font-medium uppercase tracking-wide">
+              Средний охват
+            </CardDescription>
+            <CardTitle className="text-3xl font-bold tracking-tight">
+              {formatNumber(metrics.avgReach, 0)}
+            </CardTitle>
           </CardHeader>
         </Card>
-        <Card>
+        <Card className="metric-card-er overflow-hidden">
           <CardHeader className="pb-2">
-            <CardDescription>Средний ER</CardDescription>
-            <CardTitle>{formatPercent(metrics.avgEr)}</CardTitle>
+            <CardDescription className="text-xs font-medium uppercase tracking-wide">
+              Средний ER
+            </CardDescription>
+            <CardTitle className="text-3xl font-bold tracking-tight">
+              {formatPercent(metrics.avgEr)}
+            </CardTitle>
           </CardHeader>
         </Card>
-        <Card>
+        <Card className="metric-card-count overflow-hidden">
           <CardHeader className="pb-2">
-            <CardDescription>Постов в периоде</CardDescription>
-            <CardTitle>{metrics.postCount}</CardTitle>
+            <CardDescription className="text-xs font-medium uppercase tracking-wide">
+              Постов в периоде
+            </CardDescription>
+            <CardTitle className="text-3xl font-bold tracking-tight">{metrics.postCount}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -214,7 +240,7 @@ export function OverviewPage() {
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Line type="monotone" dataKey="value" stroke="#2563eb" dot={false} />
+                <Line type="monotone" dataKey="value" stroke={CHART_PRIMARY} strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -230,7 +256,7 @@ export function OverviewPage() {
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Line type="monotone" dataKey="value" stroke="#16a34a" dot={false} />
+                <Line type="monotone" dataKey="value" stroke={CHART_SUCCESS} strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -260,11 +286,11 @@ export function OverviewPage() {
         <CardContent className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="pb-2 pr-4">Дата</th>
-                <th className="pb-2 pr-4">Текст</th>
-                <th className="pb-2 pr-4">Охват</th>
-                <th className="pb-2">ER</th>
+              <tr className="border-b border-border/80 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="pb-3 pr-4">Дата</th>
+                <th className="pb-3 pr-4">Текст</th>
+                <th className="pb-3 pr-4">Охват</th>
+                <th className="pb-3">ER</th>
               </tr>
             </thead>
             <tbody>
@@ -273,7 +299,7 @@ export function OverviewPage() {
                 return (
                   <tr
                     key={p.id}
-                    className="cursor-pointer border-b hover:bg-muted/50"
+                    className="cursor-pointer border-b border-border/50 transition-colors last:border-0 hover:bg-muted/60"
                     onClick={() => {
                       setSelectedPost(p)
                       setNote(p.manual_note ?? '')
@@ -296,7 +322,7 @@ export function OverviewPage() {
       </Card>
 
       {selectedPost && (
-        <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-border bg-card p-6 shadow-xl">
+        <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-border/80 bg-card/95 p-6 shadow-xl backdrop-blur-sm page-enter">
           <Button variant="ghost" size="sm" className="mb-4" onClick={() => setSelectedPost(null)}>
             Закрыть
           </Button>
@@ -306,7 +332,7 @@ export function OverviewPage() {
           <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
             {(['reach', 'impressions', 'er', 'likes', 'comments', 'clicks'] as const).map(
               (k) => (
-                <div key={k} className="rounded bg-muted p-2">
+                <div key={k} className="rounded-xl bg-muted/80 p-3">
                   <div className="text-xs text-muted-foreground uppercase">{k}</div>
                   <div className="font-medium">
                     {selectedPost.post_metrics[0]?.[k] ?? '—'}

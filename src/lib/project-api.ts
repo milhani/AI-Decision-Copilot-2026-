@@ -36,6 +36,5 @@ export async function invalidateProjectCache(projectId: string): Promise<void> {
 
 export async function reloadProjectBundle(projectId: string): Promise<ProjectBundle> {
   clearProjectBundleInflight(projectId)
-  await invalidateProjectCache(projectId)
   return fetchProjectBundle(projectId)
 }

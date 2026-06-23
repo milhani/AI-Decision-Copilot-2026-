@@ -5,7 +5,7 @@ export type HypothesisStatus =
   | 'rejected'
   | 'postponed'
 
-export type AiMode = 'analyst' | 'coach'
+export type AiMode = 'analyst' | 'coach' | 'chat'
 
 export interface UserProfile {
   id: string
@@ -81,11 +81,18 @@ export interface Hypothesis {
   closed_at: string | null
 }
 
+export interface AiChatSnapshot {
+  aiContext: unknown
+  coachStep?: number
+}
+
 export interface AiSession {
   id: string
   project_id: string
   mode: AiMode
+  title: string | null
   messages: AiMessage[]
+  context_snapshot: AiChatSnapshot | null
   created_at: string
   updated_at: string
 }

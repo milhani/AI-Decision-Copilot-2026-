@@ -1,3 +1,4 @@
+import { getCachedProject } from '../cache.js'
 import { timed } from '../logger.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import { assertProjectOwner } from './ownership.js'
@@ -23,6 +24,12 @@ export async function getHypothesis(
   hypothesisId: string,
   userId: string,
 ): Promise<{ hypothesis: Hypothesis | null; dbMs: number }> {
+  const cached = getCachedProject(userId, projectId)
+  if (cached) {
+    const hypothesis = cached.hypotheses.find((h) => h.id === hypothesisId) ?? null
+    return { hypothesis, dbMs: 0 }
+  }
+
   await assertProjectOwner(projectId, userId)
 
   const { data: hypothesis, ms } = await timed('hypotheses.get', async () => {

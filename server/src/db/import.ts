@@ -1,4 +1,4 @@
-import { invalidateProject } from '../cache.js'
+import { getCachedProject, refreshProjectCache } from '../cache.js'
 import { logInfo, timed } from '../logger.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { ParsedRow } from '../import/types.js'
@@ -65,7 +65,7 @@ export async function importPosts(
 
     const admin = getSupabaseAdmin()
 
-    if (!options?.skipOwnershipCheck) {
+    if (!options?.skipOwnershipCheck && !getCachedProject(userId, projectId)) {
       const { data: owned, ms: checkMs } = await timed('import.check_owner', async () => {
         const { data, error } = await admin
           .from('projects')
@@ -115,7 +115,7 @@ export async function importPosts(
         })
         if (error) throw new Error(error.message)
       })
-      invalidateProject(userId, projectId)
+      await refreshProjectCache(userId, projectId)
     }
 
     return { imported, failed, fileName }
